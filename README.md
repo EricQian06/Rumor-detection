@@ -222,9 +222,8 @@ explanation = client.generate_explanation(
 
 ```
 .
-├── data/                   # 数据集
-│   ├── train.csv
-│   └── val.csv
+├── train.csv               # 训练集
+├── val.csv                 # 验证集
 ├── checkpoints/            # 训练好的模型权重
 ├── results/                # 实验结果、图表、预测输出
 ├── src/                    # 核心源码
