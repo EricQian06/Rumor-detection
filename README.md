@@ -2,6 +2,21 @@
 
 基于深度学习的社交媒体谣言检测与可解释分析。本项目为 SJTU《人工智能导论》2026 大作业。
 
+## 项目概述
+
+本项目构建了一个**可解释的谣言检测系统**，输入一条英文推文，输出：
+1. **分类结果**：rumor（1）或 non-rumor（0），val.csv 上准确率 **87.78%**
+2. **自然语言解释**：由 LLM 生成的判断依据，支持**正反两面论述**（既说明支持预测的证据，也分析可能的反方证据）
+
+技术栈：RoBERTa 分类器（`roberta-base`）→ Captum Integrated Gradients 归因 → SJTU CLAW API（`minimax` 模型）生成解释。
+
+**关键特性**：
+- GPU 训练（CUDA 12.4），5 epochs 约 40 分钟
+- 加长 max_len=256 + 类别加权，rumor recall 达 **90.86%**
+- LLM 解释含置信度、事件类别、正反证据引用
+- 支持单条推理、批量推理、快速随机测试
+- API 失效时自动降级为模板解释，确保流水线不中断
+
 ---
 
 ## 仓库导航
@@ -10,8 +25,11 @@
 |------|------|
 | [CLAUDE.md](./CLAUDE.md) | 面向 Claude Code 的仓库工作指南 |
 | [分工.md](./分工.md) | 组内四人技术方案、模块接口与交付标准 |
+| [Project.md](./Project.md) | **项目全过程记录**：实验结果、错误分析、优化方案、迁移指南 |
 | `作业要求.txt` | 课程组发布的原始作业要求 |
 | `作业模板.txt` | 课程组发布的报告模板 |
+
+> **📋 完整项目记录**：实验结果、错误分析、后续优化方案、迁移到新电脑的操作步骤，请参阅 **[Project.md](./Project.md)**。
 
 ---
 
@@ -25,73 +43,179 @@ pip install -r requirements.txt
 
 > 推荐 Python 3.10。若使用 CUDA，请按官方说明安装对应版本的 PyTorch。
 
-### 模型权重
+### 训练模型
 
-（待补充：下载链接、放置路径、文件大小说明）
+```bash
+# GPU 训练（推荐，约 8 分钟/epoch）
+python -m src.train --train_csv train.csv --val_csv val.csv --epochs 5 --batch_size 32 --lr 2e-5 --num_workers 4
+
+# CPU 训练（约 10-30 分钟/epoch）
+python -m src.train --train_csv train.csv --val_csv val.csv --epochs 5 --batch_size 32 --lr 2e-5 --num_workers 0
+
+# 最佳模型将保存到 checkpoints/best_model.pt
+```
+
+### 评估模型
+
+```bash
+python -m src.evaluate --model_dir checkpoints --val_csv val.csv
+```
+
+输出：准确率、F1、混淆矩阵图（`results/confusion_matrix.png`）、错误样例（`results/error_cases.json`）。
+
+**当前 Baseline 结果**（`roberta-base`，GPU + max_len=256 + 类别加权，详见 [Project.md](./Project.md)）：
+
+| 指标 | 值 |
+|------|-----|
+| Accuracy | **87.78%** |
+| F1 Score (rumor) | **0.8665** |
+| Recall (rumor) | **0.9086** |
+
+> 相较 v1.0（85.29%），v2.0 通过加长 max_len 和类别加权，**rumor recall 提升 8.57%**，假阴性显著减少。详细分析请参阅 **[Project.md](./Project.md)**。
 
 ### 单条推理
 
 ```bash
-python inference.py --text "Here is a sample tweet text."
+python inference.py --text "Here is a sample tweet text." --event 0
 ```
 
 输出示例：
 ```json
 {
   "label": 1,
-  "explanation": "This tweet is classified as rumor because it contains suspicious keywords such as 'breaking', 'unverified'."
+  "confidence": 0.9905,
+  "explanation": "## Classification Analysis\n\n**Predicted Label: Rumor (Label 1) with 99.05% confidence**\n\nThis tweet is classified as a rumor primarily due to the explicit language stating 'Sources unverified' and 'Unconfirmed reports,' which directly signal the information lacks credible verification. However, there is reasonable counter-evidence: the tweet does use proper journalistic attribution and names a specific location ('Shanghai'), which are hallmarks of legitimate news reporting. The distinction is that while the structure resembles credible news, the tweet's own admission that sources are 'unverified' makes the claim fundamentally unverified.",
+  "evidence": {
+    "predicted": [{"token": " reports", "score": 0.2915}, ...],
+    "opposite": [{"token": "BRE", "score": 0.1835}, ...]
+  },
+  "event": 0
 }
+```
+
+解释特点：
+- **正反两面论述**：既说明支持预测标签的证据，也分析可能被误判为对立标签的原因
+- **引用证据词**：解释中明确引用 Captum IG 归因提取的关键 token
+- **置信度与事件类别**：包含模型 confidence 和 event 上下文
+
+跳过 LLM（使用模板降级）：
+```bash
+python inference.py --text "..." --no_llm
 ```
 
 ### 批量推理
 
 ```bash
-python inference.py --input data/val.csv --output results/predictions.csv
+python inference.py --input val.csv --output results/predictions.csv
 ```
+
+### 快速测试（随机 10 条样本）
+
+从 `val.csv` 随机抽取 10 条（5 条 non-rumor + 5 条 rumor）进行端到端测试，查看分类结果和 LLM 解释：
+
+```bash
+python test_sample.py
+```
+
+预期输出（示例）：
+```
+测试完成！准确率: 9/10 (90%)
+```
+
+### GPU 加速（强烈推荐）
+
+若电脑有 NVIDIA GPU，安装 CUDA 版 PyTorch 以大幅加速训练：
+
+```bash
+# 卸载 CPU 版 torch，安装 CUDA 11.8 版
+pip uninstall torch -y
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# 验证 GPU 可用
+python -c "import torch; print(torch.cuda.is_available())"  # 应输出 True
+```
+
+训练时脚本会自动检测并使用 GPU。若显存不足（< 8G），请减小 `--batch_size`（如 16 或 8）。
+
+### 常见问题
+
+| 问题 | 解决 |
+|------|------|
+| `ModuleNotFoundError` | 确认虚拟环境已激活，`pip install -r requirements.txt` 已执行 |
+| `CUDA out of memory` | 减小 `--batch_size`（16 / 8 / 4），或冻结更多层 |
+| HuggingFace 下载慢/失败 | `set HF_ENDPOINT=https://hf-mirror.com`（Windows CMD）后重试 |
+| CPU 训练极慢 | 正常，5 epochs 约 1-2 小时。建议换有 GPU 的机器 |
+
+---
 
 ### CLAW API 配置（LLM 解释生成）
 
 > 本组使用 Claude Code 作为编程辅助前端，但**模型推理与 LLM 解释均通过 Python 代码调用 CLAW API**，而非直接通过 Claude Code 对话窗口请求解释。
 
-#### 1. 环境变量设置
+#### 1. 推荐：`.env` 文件（安全、方便）
 
-运行任何涉及 LLM 的脚本前，先设置环境变量：
+在项目根目录创建 `.env` 文件：
+
+```env
+CLAW_API_KEY=your_api_key_here
+CLAW_BASE_URL=https://models.sjtu.edu.cn/api
+```
+
+`.env` 已被加入 `.gitignore`，**不会提交到 GitHub**，适合本地开发。
+
+#### 2. 备选：系统环境变量
+
+Linux/macOS:
 
 ```bash
 export CLAW_API_KEY="your_api_key_here"
-export CLAW_BASE_URL="https://claw.sjtu.edu.cn/v1"
+export CLAW_BASE_URL="https://models.sjtu.edu.cn/api"
 ```
 
 Windows PowerShell:
 ```powershell
 $env:CLAW_API_KEY="your_api_key_here"
-$env:CLAW_BASE_URL="https://claw.sjtu.edu.cn/v1"
+$env:CLAW_BASE_URL="https://models.sjtu.edu.cn/api"
 ```
 
-#### 2. 程序内接入方式
+> 默认使用 `minimax` 模型，通过标准 OpenAI 兼容的 `/chat/completions` 端点调用。
+
+#### 3. 程序内接入方式
 
 由 `src/llm_client.py` 统一封装所有 CLAW API 调用，其他模块禁止直接构造请求：
 
 ```python
 import os
+from dotenv import load_dotenv
 from src.llm_client import CLAWClient
+
+# 自动加载 .env 文件（如存在）
+load_dotenv()
 
 client = CLAWClient(
     api_key=os.getenv("CLAW_API_KEY"),
-    base_url=os.getenv("CLAW_BASE_URL", "https://claw.sjtu.edu.cn/v1")
+    base_url=os.getenv("CLAW_BASE_URL", "https://models.sjtu.edu.cn/api"),
+    model="minimax",
 )
 
+# 生成带正反两面论述的解释
 explanation = client.generate_explanation(
     text=tweet_text,
     label=predicted_label,
-    evidence=[{"token": "breaking", "score": 0.85}, ...]
+    confidence=predicted_confidence,
+    event=event_id,
+    evidence={
+        "predicted": [{"token": "breaking", "score": 0.85}, ...],
+        "opposite": [{"token": "confirmed", "score": 0.42}, ...],
+    }
 )
 ```
 
 关键约定：
-- **API Key 必须走环境变量**，禁止硬编码在源码或配置文件中。
+
+- **API Key 必须走环境变量或 `.env` 文件**，禁止硬编码在源码或配置文件中。
 - **调用端点**：请参照 [SJTU CLAW API 文档](https://claw.sjtu.edu.cn/guide/sjtu-api/) 确认当前支持的 chat/completions 端点。
-- **降级策略**：若 API 超时、限流或返回异常，`CLAWClient` 自动返回模板解释，确保流水线不中断。详见 `src/llm_client.py` 实现。
+- **降级策略**：若 API Key 未配置、超时、限流或返回异常，`CLAWClient` 自动返回模板解释，确保流水线不中断。详见 `src/llm_client.py` 实现。
 - **批量限速**：批量生成解释时，建议在 `llm_client.py` 内加入 `time.sleep(0.5)` 避免触发限流。
 
 ---
@@ -113,6 +237,7 @@ explanation = client.generate_explanation(
 │   ├── explainer.py        # 可解释性归因
 │   └── llm_client.py       # CLAW API 封装
 ├── inference.py            # 端到端推理入口
+├── test_sample.py          # 随机 10 条样本快速测试
 ├── requirements.txt        # Python 依赖
 ├── README.md               # 本文件
 ├── CLAUDE.md               # Claude Code 工作指南
@@ -130,7 +255,7 @@ explanation = client.generate_explanation(
 - 每人开发时从 `master` 检出功能分支，完成后通过 Pull Request 或合并提交合并回 `master`。
 
 ```bash
-# 示例：同学B开发分类模型
+# 示例：刘开发分类模型
 git checkout -b feat/classifier
 # ... 开发、提交 ...
 git checkout master
@@ -184,11 +309,11 @@ git commit -m "docs: update README with inference examples"
 
 | 评分项 | 对应内容 | 负责人 |
 |--------|----------|--------|
-| 报告叙述清楚（30分） | `report.pdf`（数据洞察、实验图表素材） | D（整合）、A（素材） |
-| 代码可运行、部署说明清楚（25分） | `README.md`、`requirements.txt`、`inference.py` | D |
-| val.csv 分类准确率（15分） | `train.py`、`evaluate.py`、最佳模型 | B |
-| 检测依据可解释性（15分） | `explainer.py`、`llm_client.py` | C |
-| 小组分工协作（15分） | 全员 commit 记录 + `分工.md` | 全员（A 负责 Baseline 与数据流水线） |
+| 报告叙述清楚（30分） | `report.pdf`（数据洞察、实验图表素材） | 贺（整合）、荣（素材） |
+| 代码可运行、部署说明清楚（25分） | `README.md`、`requirements.txt`、`inference.py` | 贺 |
+| val.csv 分类准确率（15分） | `train.py`、`evaluate.py`、最佳模型 | 刘 |
+| 检测依据可解释性（15分） | `explainer.py`、`llm_client.py` | 钱 |
+| 小组分工协作（15分） | 全员 commit 记录 + `分工.md` | 全员（荣 负责 Baseline 与数据流水线） |
 
 ---
 
