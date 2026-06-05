@@ -34,12 +34,12 @@ class SafeArgs:
     train_csv = "train.csv"
     val_csv = "val.csv"
     # 优化模型选择（按 Colab T4 显存安全排序）：
-    #   roberta-base       (125M, 最安全)
-    #   microsoft/deberta-v3-base (86M, 效果通常优于 roberta-base)
-    #   roberta-large      (355M, batch_size 需降到 8~16)
+    #   roberta-base       (125M, 最安全, bs=32)
+    #   microsoft/deberta-v3-base (86M, 效果通常优于 roberta-base, bs=16)
+    #   roberta-large      (355M, bs 需降到 8)
     model_name = "microsoft/deberta-v3-base"
     epochs = 5
-    batch_size = 32        # Colab T4 安全值；若用 roberta-large 请改为 16
+    batch_size = 16        # DeBERTa attention 机制显存占用大，T4 上 16 安全
     lr = 2e-5
     max_len = 256
     output_dir = "checkpoints"
