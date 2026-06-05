@@ -28,12 +28,29 @@ from src.explainer import IGExplainer
 from src.llm_client import CLAWClient
 
 
-def load_model(model_dir: str = "checkpoints", device=None):
-    """加载训练好的模型和 tokenizer。"""
+def load_model(model_dir: str = "checkpoints", device=None, model_name: str = None):
+    """加载训练好的模型和 tokenizer。
+
+    Args:
+        model_dir: checkpoint 目录
+        device: 计算设备
+        model_name: 强制指定 backbone 名称；为 None 时自动从 model_config.json 读取
+    """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, tokenizer = build_model_and_tokenizer()
+    # 自动识别训练时使用的 backbone 名称
+    if model_name is None:
+        config_path = os.path.join(model_dir, "model_config.json")
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                model_name = json.load(f).get("model_name", "roberta-base")
+            print(f"Auto-detected model_name: {model_name}")
+        else:
+            model_name = "roberta-base"
+            print(f"Warning: model_config.json not found, defaulting to {model_name}")
+
+    model, tokenizer = build_model_and_tokenizer(model_name)
     model_path = os.path.join(model_dir, "best_model.pt")
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model not found at {model_path}. Please run training first.")

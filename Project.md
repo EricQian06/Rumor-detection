@@ -171,8 +171,9 @@ python -m src.train --train_csv train.csv --val_csv val.csv --epochs 5 --batch_s
 **已尝试 / 未尝试**：
 - [x] roberta-base baseline（85.29%）
 - [x] max_len=256 + 类别加权（87.78%）
+- [x] 修复 evaluate.py / inference.py 模型加载硬编码 bug（支持自动识别 checkpoint 对应的 backbone）
+- [ ] deberta-v3-base（Colab T4 已适配，待训练）
 - [ ] roberta-large
-- [ ] deberta-v3-base
 - [ ] 数据增强
 - [ ] 集成学习
 
@@ -191,6 +192,9 @@ python -m src.train --train_csv train.csv --val_csv val.csv --epochs 5 --batch_s
 | 2026/05/31 | 从 val.csv 随机抽取 10 条样本进行端到端测试，准确率 **90%**（9/10），LLM 解释质量良好（含正反两面论述、事实核查、置信度分析） | Claude |
 | 2026/06/02 | **安全改造**：移除 `inference.py` / `test_sample.py` 中硬编码的 API Key fallback；引入 `python-dotenv` + `.env` 文件支持；`.gitignore` 新增 `.env`；未配置 Key 时自动降级为模板解释 | Claude |
 | 2026/06/02 | 端到端验证 `.env` 配置生效：2 条 val.csv 样本推理全部正确，LLM 生成解释质量显著高于模板降级 | Claude |
+| 2026/06/05 | **Colab 适配**：创建 `colab_train.ipynb` + `colab_train_safe.py`，修复大小写路径问题，添加 T4 GPU 优化参数和 OOM 保护 | Claude |
+| 2026/06/05 | **模型加载 Bug 修复**：`train.py` 保存 `model_config.json` 记录 backbone 名称；`evaluate.py` / `inference.py` 自动读取该配置，彻底消除硬编码 `roberta-base` 导致的维度不匹配问题 | Claude |
+| 2026/06/05 | **DeBERTa 支持**：默认切换为 `microsoft/deberta-v3-base`，Colab Notebook 和 safe 脚本均适配，预期再提升 +2~3% | Claude |
 
 ---
 
@@ -393,16 +397,19 @@ def eda_synonym_replacement(text, n=2):
 
 ### 6.6 优化优先级总结
 
-| 优先级 | 优化项 | 预期提升 | 实现难度 | 硬件要求 |
-|--------|--------|----------|----------|----------|
-| 🔴 高 | 加长 max_len 到 256 | +1~2% | ⭐ 极易 | 无 |
-| 🔴 高 | 类别加权（加权 CrossEntropy） | +1~2% | ⭐ 极易 | 无 |
-| 🟡 中 | 换 deberta-v3-base | +2~3% | ⭐⭐ 容易 | 推荐 GPU |
-| 🟡 中 | 换 roberta-large | +2~4% | ⭐⭐⭐ 中等 | **必须 GPU + 显存 > 8G** |
-| 🟢 低 | 集成学习（3 模型投票） | +1~3% | ⭐⭐⭐⭐ 较复杂 | 训练成本 ×3 |
-| 🟢 低 | 数据增强 | +1~2% | ⭐⭐⭐ 中等 | 无 |
+| 优先级 | 优化项 | 预期提升 | 实现难度 | 硬件要求 | 状态 |
+|--------|--------|----------|----------|----------|------|
+| ✅ 已完成 | 加长 max_len 到 256 | +1~2% | ⭐ 极易 | 无 | v2.0 已实施 |
+| ✅ 已完成 | 类别加权（加权 CrossEntropy） | +1~2% | ⭐ 极易 | 无 | v2.0 已实施 |
+| 🟡 **当前** | **换 deberta-v3-base** | **+2~3%** | ⭐⭐ 容易 | 推荐 GPU | **Colab 已适配，待训练** |
+| 🟡 中 | 换 roberta-large | +2~4% | ⭐⭐⭐ 中等 | **必须 GPU + 显存 > 8G** | 未开始 |
+| 🟢 低 | 集成学习（3 模型投票） | +1~3% | ⭐⭐⭐⭐ 较复杂 | 训练成本 ×3 | 未开始 |
+| 🟢 低 | 数据增强 | +1~2% | ⭐⭐⭐ 中等 | 无 | 未开始 |
 
-**建议执行顺序**：先完成「加长 max_len + 类别加权」（无需 GPU，30 分钟可完成），若效果仍不满意再换 `deberta-v3-base`。
+**建议执行顺序**：
+1. ✅ 已完成「加长 max_len + 类别加权」（87.78%）
+2. 🟡 **当前**：在 Colab T4 GPU 上训练 `deberta-v3-base`，预期突破 **90%**
+3. 若 deberta 仍不满意，再尝试 `roberta-large`（需降低 batch_size 到 8~16）
 
 ---
 

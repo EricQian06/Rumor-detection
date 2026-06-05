@@ -131,6 +131,11 @@ def train(args):
     with open(os.path.join(args.output_dir, "training_history.json"), "w") as f:
         json.dump(history, f, indent=2)
 
+    # 保存模型配置，供 evaluate / inference 自动识别 backbone
+    model_config = {"model_name": args.model_name}
+    with open(os.path.join(args.output_dir, "model_config.json"), "w") as f:
+        json.dump(model_config, f, indent=2)
+
     print(f"\nTraining finished. Best val_acc: {best_val_acc:.4f}")
 
 

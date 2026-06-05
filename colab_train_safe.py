@@ -33,9 +33,13 @@ gc.collect()
 class SafeArgs:
     train_csv = "train.csv"
     val_csv = "val.csv"
-    model_name = "roberta-base"
+    # 优化模型选择（按 Colab T4 显存安全排序）：
+    #   roberta-base       (125M, 最安全)
+    #   microsoft/deberta-v3-base (86M, 效果通常优于 roberta-base)
+    #   roberta-large      (355M, batch_size 需降到 8~16)
+    model_name = "microsoft/deberta-v3-base"
     epochs = 5
-    batch_size = 32        # Colab T4 安全值，如果仍崩溃请改为 16
+    batch_size = 32        # Colab T4 安全值；若用 roberta-large 请改为 16
     lr = 2e-5
     max_len = 256
     output_dir = "checkpoints"
@@ -44,6 +48,7 @@ class SafeArgs:
 args = SafeArgs()
 
 # 你也可以在这里手动覆盖参数，例如：
+# args.model_name = "roberta-large"
 # args.batch_size = 16
 # args.epochs = 3
 

@@ -84,13 +84,26 @@ def main():
     parser.add_argument("--val_csv", default="val.csv", help="Path to validation CSV")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--max_len", type=int, default=256)
+    parser.add_argument("--model_name", type=str, default=None, help="Override backbone name (auto-detected from model_config.json if omitted)")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # 自动识别训练时使用的 backbone 名称
+    model_name = args.model_name
+    if model_name is None:
+        config_path = os.path.join(args.model_dir, "model_config.json")
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                model_name = json.load(f).get("model_name", "roberta-base")
+            print(f"Auto-detected model_name: {model_name}")
+        else:
+            model_name = "roberta-base"
+            print(f"Warning: model_config.json not found, defaulting to {model_name}")
+
     # 加载 tokenizer 和模型
-    _, tokenizer = build_model_and_tokenizer()
-    model = RumorClassifier()
+    _, tokenizer = build_model_and_tokenizer(model_name)
+    model = RumorClassifier(model_name)
     model.load_state_dict(torch.load(os.path.join(args.model_dir, "best_model.pt"), map_location=device))
     model.to(device)
 
