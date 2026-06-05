@@ -8,7 +8,7 @@ colab_train_safe.py — 在 Colab 中稳定训练的脚本
 - 自动监控 GPU 内存，OOM 前主动报错
 - 清晰的错误堆栈，不会只显示 [object CloseEvent]
 
-当前配置：roberta-large (T4 GPU 优化)
+当前配置：roberta-base (T4 GPU 优化，保留 EarlyStopping / 梯度累积 / 自动模型识别)
 """
 
 import os
@@ -35,15 +35,15 @@ gc.collect()
 class SafeArgs:
     train_csv = "train.csv"
     val_csv = "val.csv"
-    # 模型选择（按 Colab T4 显存安全排序）：
-    #   roberta-base       (125M, bs=32, lr=2e-5, 预期 ~87.8%)
-    #   microsoft/deberta-v3-base (86M, bs=16+accum2, lr=1e-5, 实验效果 ~82%, 不推荐)
-    #   roberta-large      (355M, bs=8+accum4, lr=1e-5, 预期 ~90%+) ⭐ 当前默认
-    model_name = "roberta-large"
+    # 模型选择：
+    #   roberta-base       (125M, bs=32, lr=2e-5, 预期 ~87.8%) ⭐ 当前默认
+    #   microsoft/deberta-v3-base (86M, 实验效果 ~82%, 不推荐)
+    #   roberta-large      (355M, bs=8+accum4, lr=1e-5, 实验效果 ~88.8%, 不推荐)
+    model_name = "roberta-base"
     epochs = 10            # 增加 epoch 上限，EarlyStopping 会在收敛后自动停止
-    batch_size = 8         # roberta-large 355M 参数，T4 16GB 安全值
-    accumulation_steps = 4 # 梯度累积，等效 batch_size=32，稳定训练
-    lr = 1e-5              # 大模型用更小学习率
+    batch_size = 32        # roberta-base T4 安全值
+    accumulation_steps = 1 # 梯度累积（如需更大等效 batch，改为 2 或 4）
+    lr = 2e-5              # roberta-base 标准学习率
     weight_decay = 0.01
     max_len = 256
     output_dir = "checkpoints"
@@ -53,10 +53,10 @@ class SafeArgs:
 args = SafeArgs()
 
 # 你也可以在这里手动覆盖参数，例如：
-# args.model_name = "roberta-base"
-# args.batch_size = 32
-# args.accumulation_steps = 1
-# args.lr = 2e-5
+# args.model_name = "roberta-large"
+# args.batch_size = 8
+# args.accumulation_steps = 4
+# args.lr = 1e-5
 # args.epochs = 5
 
 print("\n训练参数:")
@@ -74,8 +74,8 @@ except RuntimeError as e:
         print("ERROR: GPU 显存不足 (OOM)！")
         print("=" * 50)
         print("\n解决方案（按顺序尝试）：")
-        print("1. 修改本脚本中的 args.batch_size = 4（甚至 2）")
-        print("2. 修改 args.accumulation_steps = 8（维持等效 batch_size=32）")
+        print("1. 修改本脚本中的 args.batch_size = 16（甚至 8）")
+        print("2. 修改 args.accumulation_steps = 2（维持等效 batch_size）")
         print("3. 修改 args.max_len = 128")
         print("4. 重启运行时：代码执行程序 → 重新启动代码执行程序")
         print("=" * 50)
