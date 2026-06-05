@@ -34,16 +34,18 @@ class SafeArgs:
     train_csv = "train.csv"
     val_csv = "val.csv"
     # 优化模型选择（按 Colab T4 显存安全排序）：
-    #   roberta-base       (125M, 最安全, bs=32)
-    #   microsoft/deberta-v3-base (86M, 效果通常优于 roberta-base, bs=16)
-    #   roberta-large      (355M, bs 需降到 8)
+    #   roberta-base       (125M, 最安全, bs=32, lr=2e-5)
+    #   microsoft/deberta-v3-base (86M, bs=16 + accum=2, lr=1e-5)
+    #   roberta-large      (355M, bs=8 + accum=2, lr=1e-5)
     model_name = "microsoft/deberta-v3-base"
-    epochs = 5
-    batch_size = 16        # DeBERTa attention 机制显存占用大，T4 上 16 安全
-    lr = 2e-5
+    epochs = 10            # 增加 epoch 上限，EarlyStopping 会在收敛后自动停止
+    batch_size = 16        # DeBERTa attention 显存占用大，T4 上 16 安全
+    accumulation_steps = 2 # 梯度累积，等效 batch_size=32，稳定训练
+    lr = 1e-5              # DeBERTa 对学习率更敏感，1e-5 通常比 2e-5 更好
     max_len = 256
     output_dir = "checkpoints"
     num_workers = 2
+    patience = 3           # EarlyStopping：val_acc 连续 3 轮不提升则停止
 
 args = SafeArgs()
 
@@ -67,9 +69,10 @@ except RuntimeError as e:
         print("ERROR: GPU 显存不足 (OOM)！")
         print("=" * 50)
         print("\n解决方案（按顺序尝试）：")
-        print("1. 修改本脚本中的 args.batch_size = 16（甚至 8）")
-        print("2. 修改 args.max_len = 128")
-        print("3. 重启运行时：代码执行程序 → 重新启动代码执行程序")
+        print("1. 修改本脚本中的 args.batch_size = 8（甚至 4）")
+        print("2. 修改 args.accumulation_steps = 1（降低等效 batch_size）")
+        print("3. 修改 args.max_len = 128")
+        print("4. 重启运行时：代码执行程序 → 重新启动代码执行程序")
         print("=" * 50)
         # 清空显存，防止后续单元格也失败
         if torch.cuda.is_available():

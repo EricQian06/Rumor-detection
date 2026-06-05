@@ -137,7 +137,31 @@ python -m src.train --train_csv train.csv --val_csv val.csv --epochs 5 --batch_s
 混淆矩阵图：`results/confusion_matrix.png`
 错误样例：`results/error_cases.json`
 
-> **结论**：准确率从 85.29% 提升至 **87.78%**（+2.49%）。**rumor recall 大幅提升至 90.86%**（+8.57%），假阴性显著减少，类别加权策略效果显著。当前性能处于课程项目**优秀区间上限**，后续如需进一步提升可尝试 `deberta-v3-base`。
+> **结论**：准确率从 85.29% 提升至 **87.78%**（+2.49%）。**rumor recall 大幅提升至 90.86%**（+8.57%），假阴性显著减少，类别加权策略效果显著。
+
+---
+
+**v3.0 DeBERTa 初探（Colab T4, bs=16, lr=2e-5, 5 epochs）**
+
+运行命令：
+```bash
+python -m src.train --model_name microsoft/deberta-v3-base --train_csv train.csv --val_csv val.csv --epochs 5 --batch_size 16 --lr 2e-5 --max_len 256
+```
+
+| epoch | train_loss | val_loss | val_acc | 备注 |
+|-------|-----------|----------|---------|------|
+| 1 | 0.6520 | 0.5162 | 0.7406 | — |
+| 2 | 0.4895 | 0.4736 | 0.7731 | — |
+| 3 | 0.3857 | 0.5075 | 0.7805 | val_loss 开始上升 |
+| 4 | 0.2998 | 0.5285 | 0.8080 | 过拟合迹象 |
+| 5 | 0.2508 | 0.5613 | **0.8229** | train_loss 持续降，但 val_loss 持续升 |
+
+**问题诊断**：
+- val_acc 仍在涨（74% → 82%），但 **val_loss 从 epoch 2 起持续上升**，说明 5 epoch 不够且已过拟合
+- batch_size=16 太小，DeBERTa 对 batch size 敏感
+- lr=2e-5 对 DeBERTa 偏高
+
+**下一步优化**：EarlyStopping + 梯度累积（等效 bs=32）+ lr=1e-5 + weight_decay=0.1
 
 ### 3.3 错误分析
 
@@ -195,6 +219,7 @@ python -m src.train --train_csv train.csv --val_csv val.csv --epochs 5 --batch_s
 | 2026/06/05 | **Colab 适配**：创建 `colab_train.ipynb` + `colab_train_safe.py`，修复大小写路径问题，添加 T4 GPU 优化参数和 OOM 保护 | Claude |
 | 2026/06/05 | **模型加载 Bug 修复**：`train.py` 保存 `model_config.json` 记录 backbone 名称；`evaluate.py` / `inference.py` 自动读取该配置，彻底消除硬编码 `roberta-base` 导致的维度不匹配问题 | Claude |
 | 2026/06/05 | **DeBERTa 支持**：默认切换为 `microsoft/deberta-v3-base`，Colab Notebook 和 safe 脚本均适配，预期再提升 +2~3% | Claude |
+| 2026/06/05 | **DeBERTa 调优**：v3.0 初探仅 82.29%，诊断为过拟合 + lr 过大 + batch 过小；v3.1 新增 EarlyStopping、梯度累积、lr=1e-5、weight_decay=0.1 | Claude |
 
 ---
 

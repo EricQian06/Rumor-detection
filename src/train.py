@@ -84,6 +84,7 @@ def train(args):
 
     # 4. 训练循环
     best_val_acc = 0.0
+    patience_counter = 0
     history = {"train_loss": [], "val_loss": [], "val_acc": []}
 
     for epoch in range(args.epochs):
@@ -91,24 +92,30 @@ def train(args):
         epoch_loss = 0.0
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}")
 
-        for batch in pbar:
+        for step, batch in enumerate(pbar):
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             labels = batch["label"].to(device)
 
-            optimizer.zero_grad()
             outputs = model(input_ids, attention_mask)
             logits = outputs["logits"]
             loss = criterion(logits, labels)
+
+            # 梯度累积：等效大 batch_size
+            if args.accumulation_steps > 1:
+                loss = loss / args.accumulation_steps
+
             loss.backward()
 
-            # 梯度裁剪，防止爆炸
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            # 每 accumulation_steps 步更新一次参数
+            if (step + 1) % args.accumulation_steps == 0 or (step + 1) == len(train_loader):
+                # 梯度裁剪，防止爆炸
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
 
-            optimizer.step()
-            scheduler.step()
-
-            epoch_loss += loss.item()
+            epoch_loss += loss.item() * (args.accumulation_steps if args.accumulation_steps > 1 else 1)
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
         avg_train_loss = epoch_loss / len(train_loader)
@@ -119,13 +126,20 @@ def train(args):
         history["val_loss"].append(val_loss)
         history["val_acc"].append(val_acc)
 
-        # 保存最佳模型
+        # 保存最佳模型 + Early Stopping
         if val_acc > best_val_acc:
             best_val_acc = val_acc
+            patience_counter = 0
             os.makedirs(args.output_dir, exist_ok=True)
             torch.save(model.state_dict(), os.path.join(args.output_dir, "best_model.pt"))
             tokenizer.save_pretrained(args.output_dir)
             print(f"  → Best model saved (val_acc={val_acc:.4f})")
+        else:
+            patience_counter += 1
+            print(f"  → val_acc did not improve ({patience_counter}/{args.patience})")
+            if patience_counter >= args.patience:
+                print(f"\nEarly stopping triggered after {epoch+1} epochs.")
+                break
 
     # 5. 保存训练历史
     with open(os.path.join(args.output_dir, "training_history.json"), "w") as f:
@@ -150,6 +164,8 @@ def main():
     parser.add_argument("--max_len", type=int, default=256, help="Max sequence length")
     parser.add_argument("--output_dir", default="checkpoints", help="Directory to save model")
     parser.add_argument("--num_workers", type=int, default=4, help="DataLoader num_workers")
+    parser.add_argument("--patience", type=int, default=3, help="Early stopping patience (epochs)")
+    parser.add_argument("--accumulation_steps", type=int, default=1, help="Gradient accumulation steps (simulate larger batch)")
     args = parser.parse_args()
     train(args)
 
