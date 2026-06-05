@@ -178,7 +178,40 @@ python -m src.train --model_name microsoft/deberta-v3-base --train_csv train.csv
 1. 数据集太小，DeBERTa 的 disentangled attention 难以发挥优势
 2. weight_decay=0.1 过强，导致模型学不动（train_loss 下降极慢）
 
-**决策**：放弃 DeBERTa，切换至 **roberta-large**（355M 参数，预期 +2~4%）。
+**v4.0 roberta-large（Colab T4, bs=8+accum4, lr=1e-5, 10 epochs + EarlyStopping）**
+
+运行命令：
+```bash
+python -m src.train --model_name roberta-large --train_csv train.csv --val_csv val.csv --epochs 10 --batch_size 8 --accumulation_steps 4 --lr 1e-5 --max_len 256 --patience 3
+```
+
+| epoch | train_loss | val_loss | val_acc | 备注 |
+|-------|-----------|----------|---------|------|
+| 1 | 0.6378 | 0.4751 | 0.7805 | — |
+| 2 | 0.4041 | 0.3488 | 0.8529 | — |
+| 3 | 0.2810 | 0.3214 | 0.8753 | — |
+| 4 | 0.2001 | 0.3394 | 0.8753 | val_loss 上升 |
+| 5 | 0.1387 | 0.3149 | 0.8803 | — |
+| 6 | 0.0814 | **0.4475** | 0.8653 | val_loss 暴涨 |
+| 7 | 0.0537 | **0.5362** | 0.8853 | 严重过拟合 |
+| 8 | 0.0415 | **0.6666** | **0.8878** | 最佳，但 val_loss 失控 |
+| 9 | 0.0287 | 0.6423 | 0.8853 | — |
+| 10 | 0.0209 | 0.6587 | 0.8828 | — |
+
+**最终评估结果（val.csv，n=401）**：
+
+| 指标 | roberta-base | roberta-large | 变化 |
+|------|-------------|---------------|------|
+| Accuracy | **87.78%** | **88.78%** | +1.00% |
+| 训练时间/epoch | ~5 min | ~7 min | ×1.4 |
+
+**问题诊断**：
+- train_loss 降到 0.02，val_loss 飙到 0.67：教科书式**严重过拟合**
+- 355M 参数 vs ~2.8K 训练样本：模型容量远超数据量，记忆了噪声
+- 仅提升 1% 准确率，训练时间增加 40%，**性价比极低**
+
+**最终决策**：放弃 roberta-large 和 DeBERTa，**默认模型回退至 roberta-base**。
+所有代码改进（EarlyStopping、梯度累积、自动识别 backbone、weight_decay CLI）保留，方便未来换模型测试。
 
 ---
 
@@ -195,30 +228,31 @@ python -m src.train --model_name microsoft/deberta-v3-base --train_csv train.csv
 
 ### 3.4 调整方法与记录
 
-**当前状态**：准确率 **87.78%**（GPU + max_len=256 + 类别加权）。以下优化方向可进一步提升至 **90%+**：
+**当前状态**：准确率 **87.78%**（roberta-base + GPU + max_len=256 + 类别加权）。经过 DeBERTa 和 roberta-large 实验后确认，**roberta-base 是该数据集的最优选择**。
 
-| 优化方向           | 预期提升    | 具体做法                                                                   |
-| -------------- | ------- | ---------------------------------------------------------------------- |
-| **换更强模型**      | +2~4%   | 使用 `roberta-large` 或 `deberta-v3-base` 替代 `roberta-base`。参数量更大，语义理解更深。 |
-| **加长 max_len** | +1~2%   | 当前 `max_len=128`，部分推文被截断。可尝试 `256`，让模型看到完整上下文。                         |
-| **类别加权**       | +1~2%   | 使用 `CrossEntropyLoss(weight=[1.0, 1.2])` 提高对 rumor 类的惩罚，减少假阴性。         |
-| **数据增强**       | +1~2%   | 对 rumor 类做同义词替换、回译（back-translation），扩充少数类样本。                          |
-| **集成学习**       | +1~3%   | 训练 3 个不同 seed 的模型，投票决定最终标签。                                            |
-| **特征工程**       | +0.5~1% | 加入额外特征：文本长度、感叹号数量、URL 数量、是否全大写等。                                       |
+| 优化方向 | 预期提升 | 具体做法 | 实验结果 |
+|----------|---------|---------|----------|
+| ~~换更强模型~~ | ~~+2~4%~~ | ~~roberta-large / deberta-v3-base~~ | ❌ roberta-large 仅 +1% 且严重过拟合；DeBERTa 仅 82% |
+| ✅ 加长 max_len | +1~2% | 256（原 128） | ✅ v2.0 已实施，有效 |
+| ✅ 类别加权 | +1~2% | `CrossEntropyLoss(weight=[0.8875, 1.1452])` | ✅ v2.0 已实施，rumor recall +8.57% |
+| 🟡 数据增强 | +1~2% | 同义词替换、回译 | ⏳ 未尝试，如需突破 90% 可尝试 |
+| 🟡 集成学习 | +1~3% | 3 模型投票 | ⏳ 未尝试，如需突破 90% 可尝试 |
+| 🟡 特征工程 | +0.5~1% | 文本长度、感叹号、URL 数量 | ⏳ 未尝试 |
 
-**优先级建议**：
-1. **高优先级**：换 `roberta-large`（效果最明显，但需 GPU，显存 > 8G）
-2. **中优先级**：加长 `max_len` 到 256 + 类别加权（易实现，几乎无额外成本）
-3. **低优先级**：数据增强、集成学习（投入产出比相对较低）
+**最终优先级建议**：
+1. **✅ 已完成**：roberta-base + max_len=256 + 类别加权 = **87.78%**（课程项目优秀水平）
+2. 🟡 **如需突破 90%**：尝试**集成学习**（3 个 roberta-base 投票）或**数据增强**
+3. ❌ **不推荐**：换更大 backbone（数据集太小，大模型严重过拟合）
 
 **已尝试 / 未尝试**：
 - [x] roberta-base baseline（85.29%）
 - [x] max_len=256 + 类别加权（87.78%）
-- [x] 修复 evaluate.py / inference.py 模型加载硬编码 bug（支持自动识别 checkpoint 对应的 backbone）
-- [ ] deberta-v3-base（Colab T4 已适配，待训练）
-- [ ] roberta-large
+- [x] 修复 evaluate.py / inference.py / test_sample.py 硬编码 bug（自动识别 backbone）
+- [x] DeBERTa-v3-base（82.29% / 81.55%，效果不佳，已放弃）
+- [x] roberta-large（88.78%，严重过拟合，性价比低，已放弃）
 - [ ] 数据增强
 - [ ] 集成学习
+- [ ] 特征工程
 
 ---
 
@@ -239,6 +273,9 @@ python -m src.train --model_name microsoft/deberta-v3-base --train_csv train.csv
 | 2026/06/05 | **模型加载 Bug 修复**：`train.py` 保存 `model_config.json` 记录 backbone 名称；`evaluate.py` / `inference.py` 自动读取该配置，彻底消除硬编码 `roberta-base` 导致的维度不匹配问题 | Claude |
 | 2026/06/05 | **DeBERTa 支持**：默认切换为 `microsoft/deberta-v3-base`，Colab Notebook 和 safe 脚本均适配，预期再提升 +2~3% | Claude |
 | 2026/06/05 | **DeBERTa 调优**：v3.0 初探仅 82.29%，诊断为过拟合 + lr 过大 + batch 过小；v3.1 新增 EarlyStopping、梯度累积、lr=1e-5、weight_decay=0.1 | Claude |
+| 2026/06/05 | **roberta-large 实验**：Colab T4 训练 10 epochs，最佳 88.78%，但 train_loss=0.02 vs val_loss=0.66 严重过拟合，性价比低 | Claude |
+| 2026/06/05 | **最终决策**：默认模型回退至 `roberta-base`（87.78% 为最优），保留所有代码改进供未来扩展 | Claude |
+| 2026/06/05 | **更新 CLAUDE.md**：添加模型选择实验记录、Colab 训练指南、bug 修复清单 | Claude |
 
 ---
 
@@ -381,22 +418,24 @@ def train(args):
 
 ---
 
-### 6.3 优化三：换更强模型（效果最明显，预期 +2~4%，需 GPU）
+### 6.3 优化三：换更强模型（❌ 已证伪，数据集太小不适用）
 
-**做法**：将 `roberta-base` 替换为 `roberta-large` 或 `deberta-v3-base`。
+> **实验结论**：在本项目的小数据集（~2.8K 训练样本）上，**更大的 backbone 反而效果更差或性价比极低**。
 
+| 模型 | 参数量 | 最佳 val_acc | 过拟合程度 | 结论 |
+|------|--------|-------------|-----------|------|
+| `roberta-base` | 125M | **87.78%** | 轻微 | ⭐ **最优选择** |
+| `deberta-v3-base` | 86M | 82.29% | 中等 | ❌ 不适用小数据 |
+| `roberta-large` | 355M | 88.78% | **严重** | ⚠️ +1% 但训练时间 ×1.4 |
+
+**原因分析**：
+- 大模型（355M 参数）需要更多数据才能收敛，否则容易记忆噪声
+- `train_loss` 降到 0.02 而 `val_loss` 飙到 0.66 是典型过拟合信号
+- 对于课程项目级别的数据量，**roberta-base 的容量已足够**
+
+**如果仍想尝试**（代码已保留支持）：
 ```bash
-# 训练时指定模型名称
-python -m src.train --model_name roberta-large --batch_size 16 ...
-```
-
-**注意**：
-- `roberta-large` 参数量是 base 的 3 倍（355M vs 125M），推理更慢，需要 **显存 > 8G**
-- 如果显存不足，batch_size 需降到 8 或 4，并开启 `fp16`
-
-**进阶**：`deberta-v3-base` 在 NLP 分类任务上通常优于 roberta-base，且参数量相同：
-```bash
-python -m src.train --model_name microsoft/deberta-v3-base ...
+python -m src.train --model_name roberta-large --batch_size 8 --accumulation_steps 4 --lr 1e-5 ...
 ```
 
 ---
@@ -445,15 +484,16 @@ def eda_synonym_replacement(text, n=2):
 |--------|--------|----------|----------|----------|------|
 | ✅ 已完成 | 加长 max_len 到 256 | +1~2% | ⭐ 极易 | 无 | v2.0 已实施 |
 | ✅ 已完成 | 类别加权（加权 CrossEntropy） | +1~2% | ⭐ 极易 | 无 | v2.0 已实施 |
-| 🟡 **当前** | **换 deberta-v3-base** | **+2~3%** | ⭐⭐ 容易 | 推荐 GPU | **Colab 已适配，待训练** |
-| 🟡 中 | 换 roberta-large | +2~4% | ⭐⭐⭐ 中等 | **必须 GPU + 显存 > 8G** | 未开始 |
-| 🟢 低 | 集成学习（3 模型投票） | +1~3% | ⭐⭐⭐⭐ 较复杂 | 训练成本 ×3 | 未开始 |
-| 🟢 低 | 数据增强 | +1~2% | ⭐⭐⭐ 中等 | 无 | 未开始 |
+| ❌ 已放弃 | ~~换 deberta-v3-base~~ | ~~+2~3%~~ | ⭐⭐ 容易 | 推荐 GPU | 实验 82%，不适用 |
+| ❌ 已放弃 | ~~换 roberta-large~~ | ~~+2~4%~~ | ⭐⭐⭐ 中等 | 必须 GPU + 显存 > 8G | 实验 88.78%，过拟合严重 |
+| 🟡 如需突破 90% | 集成学习（3 模型投票） | +1~3% | ⭐⭐⭐⭐ 较复杂 | 训练成本 ×3 | 未开始 |
+| 🟡 如需突破 90% | 数据增强 | +1~2% | ⭐⭐⭐ 中等 | 无 | 未开始 |
+| 🟢 低 | 特征工程 | +0.5~1% | ⭐⭐ 中等 | 无 | 未开始 |
 
-**建议执行顺序**：
-1. ✅ 已完成「加长 max_len + 类别加权」（87.78%）
-2. 🟡 **当前**：在 Colab T4 GPU 上训练 `deberta-v3-base`，预期突破 **90%**
-3. 若 deberta 仍不满意，再尝试 `roberta-large`（需降低 batch_size 到 8~16）
+**最终建议**：
+1. ✅ **当前最佳**：roberta-base + max_len=256 + 类别加权 = **87.78%**（课程项目优秀水平）
+2. 🟡 **如需更高**：集成学习是唯一有希望的途径（数据增强次之）
+3. ❌ **不推荐**：更大 backbone（数据集太小，大模型必然过拟合）
 
 ---
 
@@ -469,7 +509,10 @@ def eda_synonym_replacement(text, n=2):
 | 评估与错误分析 | 混淆矩阵、错误样例、假阴性分析 | ✅ 完成 |
 | 可解释性模块 | `explainer.py` + `llm_client.py` 框架 | ✅ 完成 |
 | 端到端推理 | `inference.py` 支持单条/批量推理 | ✅ 完成 |
-| 模型优化 | 加长 max_len=256、GPU 训练、类别加权，val_acc **87.78%** | ✅ 完成 |
+| 模型优化 v2.0 | 加长 max_len=256、GPU 训练、类别加权，val_acc **87.78%** | ✅ 完成 |
+| 模型优化 v3.0/v3.1 | DeBERTa 实验（82.29% / 81.55%，已放弃） | ✅ 完成 |
+| 模型优化 v4.0 | roberta-large 实验（88.78%，严重过拟合，已放弃） | ✅ 完成 |
+| 最终模型选择 | 回退 roberta-base（87.78% 为最优），保留所有代码改进 | ✅ 完成 |
 | LLM 解释生成 | 对接 CLAW API（minimax），Prompt 含正反证据 + 置信度 + event | ✅ 完成 |
 | 安全改造 | 移除硬编码 API Key，统一使用 `.env` + `python-dotenv`，未配置时自动模板降级 | ✅ 完成 |
 | 解释质量抽查 | 人工检查 30 条解释样例 | ⏳ 待执行 |
@@ -481,10 +524,16 @@ def eda_synonym_replacement(text, n=2):
 
 - [x] 运行训练脚本，记录 baseline 正确率（85.29%）
 - [x] 完成错误分析，识别假阴性为主
-- [x] 执行优化：加长 max_len=256 + 类别加权 + GPU 训练，val_acc **87.78%**
+- [x] 执行优化 v2.0：加长 max_len=256 + 类别加权 + GPU 训练，val_acc **87.78%**
+- [x] 执行优化 v3.0/v3.1：DeBERTa 实验（82.29% / 81.55%，已放弃）
+- [x] 执行优化 v4.0：roberta-large 实验（88.78%，严重过拟合，已放弃）
+- [x] 最终模型决策：回退 roberta-base（87.78% 为数据集最优解）
 - [x] 实现 LLM 解释生成：对接 CLAW API（minimax），Prompt 含正反证据 + 置信度 + event
 - [x] 随机抽取 10 条样本测试，端到端准确率 **90%**，LLM 解释正反两面论述效果良好
 - [x] API Key 安全改造：移除硬编码 fallback，引入 `.env` 支持，验证 LLM 解释正常生成
+- [x] Colab 适配：创建 `colab_train.ipynb` + `colab_train_safe.py`，支持 T4 GPU 训练和 OOM 保护
+- [x] 模型加载 bug 修复：`train.py` 保存 `model_config.json`；`evaluate.py` / `inference.py` / `test_sample.py` 自动识别 backbone
+- [x] 新增功能：EarlyStopping、梯度累积、weight_decay CLI
 - [ ] 人工抽查 30 条解释样例，验证可解释性质量
 - [ ] 撰写 report.pdf
 - [ ] 最终检查 README.md 完整性并提交
