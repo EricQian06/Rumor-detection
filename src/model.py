@@ -20,6 +20,9 @@ class RumorClassifier(nn.Module):
         self.backbone = AutoModel.from_pretrained(model_name)
         self.dropout = nn.Dropout(dropout)
         self.classifier = nn.Linear(self.config.hidden_size, num_labels)
+        # 某些模型（如 DeBERTa）的 safetensors 权重默认以 float16 加载，
+        # 而 classifier 是 float32，会导致 matmul dtype 不匹配。统一为 float32。
+        self.to(torch.float32)
 
     def forward(self, input_ids, attention_mask, labels=None):
         outputs = self.backbone(input_ids=input_ids, attention_mask=attention_mask)
