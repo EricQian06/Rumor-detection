@@ -47,6 +47,16 @@ Train the classifier (saves best checkpoint to `checkpoints/`):
 python -m src.train --train_csv train.csv --val_csv val.csv --epochs 5 --batch_size 32 --lr 2e-5
 ```
 
+Colab 训练（推荐）：
+```bash
+# 在 Colab 中运行以下命令
+%cd /content
+!git clone https://github.com/EricQian06/Rumor-detection.git
+%cd Rumor-detection
+!pip install -q -r requirements.txt
+%run colab_train_safe.py
+```
+
 Evaluate on `val.csv` (outputs metrics, confusion matrix plot, and error cases):
 ```bash
 python -m src.evaluate --model_dir checkpoints --val_csv val.csv
@@ -121,3 +131,25 @@ These contracts are defined in `分工.md`. If you change any of them, update `�
 - **Secrets**: The CLAW API key must be read from environment variables (`CLAW_API_KEY`).
 - **Code ownership**: Respect module boundaries defined in `分工.md`. If you need to change another member's interface, discuss it first and update the interface contract in `分工.md`.
 - **Results & checkpoints**: Save experiment outputs (plots, metrics, model weights) under `results/` and `checkpoints/`. These directories are gitignored; share large files via external storage links in `README.md` rather than committing them.
+
+## Model Selection & Experiment History
+
+This section records backbone experiments so future contributors do not repeat dead ends.
+
+| Model | Params | Best val_acc | Training time/epoch (T4) | Conclusion |
+|-------|--------|--------------|--------------------------|------------|
+| `roberta-base` | 125M | **87.78%** | ~5 min | ⭐ **Default.** Best cost-benefit for this small (~4K) dataset. |
+| `microsoft/deberta-v3-base` | 86M | 82.29% | ~6 min | ❌ Poor fit. Disentangled attention overfits on small data; val_loss rises from epoch 2. |
+| `roberta-large` | 355M | 88.78% | ~7 min | ⚠️ Marginal gain (+1%) but severe overfit (train_loss 0.02 vs val_loss 0.66). Not worth the doubled training time. |
+
+**Decision**: Stay on `roberta-base`. All improvements (EarlyStopping, gradient accumulation, auto-detect `model_name`) are kept in code so other backbones can still be tested via CLI flags.
+
+## Fixed Bugs & New Features
+
+| Change | Files | Details |
+|--------|-------|---------|
+| Hard-coded `roberta-base` in `evaluate.py` / `inference.py` / `test_sample.py` | `src/evaluate.py`, `inference.py`, `test_sample.py` | `train.py` now saves `model_config.json`; loaders auto-read the backbone name. No more dimension mismatch when switching models. |
+| DeBERTa `float16` vs `float32` dtype mismatch | `src/model.py` | Added `self.to(torch.float32)` after classifier init. |
+| Missing `weight_decay` CLI arg | `src/train.py` | Added `--weight_decay` (default 0.01). |
+| Scheduler step count ignored gradient accumulation | `src/train.py` | `total_steps` now divides by `accumulation_steps`. |
+| EarlyStopping + gradient accumulation | `src/train.py`, `colab_train_safe.py` | `--patience` (default 3) stops when val_acc stalls. `--accumulation_steps` simulates larger batches on memory-constrained GPUs. |
