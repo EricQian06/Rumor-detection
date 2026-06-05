@@ -161,7 +161,26 @@ python -m src.train --model_name microsoft/deberta-v3-base --train_csv train.csv
 - batch_size=16 太小，DeBERTa 对 batch size 敏感
 - lr=2e-5 对 DeBERTa 偏高
 
-**下一步优化**：EarlyStopping + 梯度累积（等效 bs=32）+ lr=1e-5 + weight_decay=0.1
+**v3.1 DeBERTa 再尝试（Colab T4, bs=16+accum2, lr=1e-5, wd=0.1, 10 epochs + EarlyStopping）**
+
+| epoch | train_loss | val_loss | val_acc | 备注 |
+|-------|-----------|----------|---------|------|
+| 1 | 0.7123 | 0.6640 | 0.5910 | — |
+| 2 | 0.6202 | 0.5538 | 0.7382 | — |
+| 3 | 0.5201 | 0.5902 | 0.7232 | val_acc 下降 |
+| 4 | 0.4394 | 0.4848 | 0.7706 | — |
+| 5 | 0.3762 | 0.4684 | 0.7955 | — |
+| 6 | 0.3328 | 0.5167 | 0.8055 | — |
+| 7 | 0.2705 | 0.5473 | **0.8155** | 最佳 |
+| 8 | 0.2451 | 0.6069 | 0.8130 | 过拟合 |
+
+**结论**：DeBERTa 在该小数据集（~4K 条）上表现持续不佳，最高仅 **81.55%**。原因可能是：
+1. 数据集太小，DeBERTa 的 disentangled attention 难以发挥优势
+2. weight_decay=0.1 过强，导致模型学不动（train_loss 下降极慢）
+
+**决策**：放弃 DeBERTa，切换至 **roberta-large**（355M 参数，预期 +2~4%）。
+
+---
 
 ### 3.3 错误分析
 

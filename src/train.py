@@ -74,8 +74,8 @@ def train(args):
     criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     # 3. 优化器和学习率调度
-    optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
-    total_steps = len(train_loader) * args.epochs
+    optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    total_steps = len(train_loader) * args.epochs // args.accumulation_steps
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps=int(0.1 * total_steps),
@@ -161,6 +161,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=5, help="Number of epochs")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
     parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate")
+    parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay for AdamW")
     parser.add_argument("--max_len", type=int, default=256, help="Max sequence length")
     parser.add_argument("--output_dir", default="checkpoints", help="Directory to save model")
     parser.add_argument("--num_workers", type=int, default=4, help="DataLoader num_workers")
