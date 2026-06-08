@@ -11,6 +11,7 @@
 技术栈：RoBERTa 分类器（`roberta-base`）→ Captum Integrated Gradients 归因 → SJTU CLAW API（`minimax` 模型）生成解释。
 
 **关键特性**：
+- 预训练模型托管于 [HuggingFace](https://huggingface.co/charchar2333/Rumor-detection)，**可跳过训练直接使用**
 - GPU 训练（CUDA 12.4），5 epochs 约 40 分钟
 - 加长 max_len=256 + 类别加权，rumor recall 达 **90.86%**
 - LLM 解释含置信度、事件类别、正反证据引用
@@ -41,7 +42,21 @@ pip install -r requirements.txt
 
 > 推荐 Python 3.10。若使用 CUDA，请按官方说明安装对应版本的 PyTorch。
 
-### 训练模型
+### 快速使用预训练模型（推荐，无需训练）
+
+预训练模型已上传至 [HuggingFace Hub](https://huggingface.co/charchar2333/Rumor-detection)：
+
+```python
+from transformers import AutoModel, AutoTokenizer
+
+model_name = "charchar2333/Rumor-detection"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModel.from_pretrained(model_name)
+```
+
+> 下载较慢时，可设置镜像：`HF_ENDPOINT=https://hf-mirror.com`
+
+### 训练模型（可选）
 
 ```bash
 # GPU 训练（推荐，约 8 分钟/epoch）
