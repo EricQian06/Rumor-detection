@@ -23,7 +23,7 @@ load_dotenv()
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.model import RumorClassifier, build_model_and_tokenizer
+from src.model import RumorClassifier, build_model_and_tokenizer, load_model_from_path
 from src.explainer import IGExplainer
 from src.llm_client import CLAWClient
 
@@ -31,34 +31,32 @@ from src.llm_client import CLAWClient
 def load_model(model_dir: str = "checkpoints", device=None, model_name: str = None):
     """加载训练好的模型和 tokenizer。
 
+    支持两种加载方式：
+    - 本地路径：指定 model_dir，从 best_model.pt 加载
+    - HuggingFace：如 "charchar2333/Rumor-detection"，直接下载并加载
+
     Args:
-        model_dir: checkpoint 目录
+        model_dir: checkpoint 目录（本地模式）或 HuggingFace 模型名
         device: 计算设备
-        model_name: 强制指定 backbone 名称；为 None 时自动从 model_config.json 读取
+        model_name: 强制指定 backbone 名称；为 None 时从 model_config.json 读取（仅本地模式）
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 自动识别训练时使用的 backbone 名称
-    if model_name is None:
-        config_path = os.path.join(model_dir, "model_config.json")
-        if os.path.exists(config_path):
-            with open(config_path, "r") as f:
-                model_name = json.load(f).get("model_name", "roberta-base")
-            print(f"Auto-detected model_name: {model_name}")
-        else:
-            model_name = "roberta-base"
-            print(f"Warning: model_config.json not found, defaulting to {model_name}")
+    # 判断是否从 HuggingFace 加载（模型名包含 "/" 或以 charchar2333 开头）
+    is_hf = "/" in str(model_dir) or (model_name and "/" in str(model_name)) or str(model_dir).startswith("charchar")
 
-    model, tokenizer = build_model_and_tokenizer(model_name)
-    model_path = os.path.join(model_dir, "best_model.pt")
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model not found at {model_path}. Please run training first.")
-
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.to(device)
-    model.eval()
-    return model, tokenizer, device
+    if is_hf:
+        # 从 HuggingFace 加载
+        hf_name = model_name if model_name else str(model_dir)
+        print(f"Loading model from HuggingFace: {hf_name}")
+        model, tokenizer = build_model_and_tokenizer(hf_name)
+        model.to(device)
+        model.eval()
+        return model, tokenizer, device
+    else:
+        # 从本地加载
+        return load_model_from_path(model_dir, model_name)
 
 
 def predict_single(
@@ -143,7 +141,8 @@ def main():
     parser.add_argument("--event", type=int, default=0, help="Event category ID (for single text)")
     parser.add_argument("--input", type=str, default=None, help="Input CSV for batch inference")
     parser.add_argument("--output", type=str, default="results/predictions.csv", help="Output CSV path")
-    parser.add_argument("--model_dir", type=str, default="checkpoints", help="Model checkpoint directory")
+    parser.add_argument("--model_dir", type=str, default="checkpoints",
+                        help="Model path: local directory or HuggingFace model name")
     parser.add_argument("--no_llm", action="store_true", help="Skip LLM explanation, use template fallback")
     args = parser.parse_args()
 
@@ -152,7 +151,7 @@ def main():
         sys.exit(1)
 
     # 加载模型
-    print("Loading model...")
+    print(f"Loading model from: {args.model_dir}...")
     model, tokenizer, device = load_model(args.model_dir)
     explainer = IGExplainer(model, tokenizer)
 
