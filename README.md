@@ -44,17 +44,22 @@ pip install -r requirements.txt
 
 ### 快速使用预训练模型（推荐，无需训练）
 
-预训练模型已上传至 [HuggingFace Hub](https://huggingface.co/charchar2333/Rumor-detection)：
+预训练模型已上传至 [HuggingFace Hub](https://huggingface.co/charchar2333/Rumor-detection)。
 
-```python
-from transformers import AutoModel, AutoTokenizer
+**方式一：下载到本地 checkpoints/（推荐）**
+```bash
+huggingface-cli download charchar2333/Rumor-detection --local-dir checkpoints
+```
+下载后将文件放入 `./checkpoints/`，后续使用无需 `--model_dir` 参数。
 
-model_name = "charchar2333/Rumor-detection"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModel.from_pretrained(model_name)
+**方式二：直接使用 HuggingFace 路径**
+```bash
+python inference.py --model_dir charchar2333/Rumor-detection --text "your tweet"
+python inference.py --model_dir charchar2333/Rumor-detection --input val.csv --output results.csv
+python test_sample.py --model_dir charchar2333/Rumor-detection
 ```
 
-> 下载较慢时，可设置镜像：`HF_ENDPOINT=https://hf-mirror.com`
+> 下载慢时设置镜像：`set HF_ENDPOINT=https://hf-mirror.com`（Windows CMD）或 `export HF_ENDPOINT=https://hf-mirror.com`（Linux/macOS）
 
 ### 训练模型（可选）
 
