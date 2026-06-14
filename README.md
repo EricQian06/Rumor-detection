@@ -322,18 +322,6 @@ git commit -m "docs: update README with inference examples"
 
 ---
 
-## 评分对应
-
-| 评分项 | 对应内容 | 负责人 |
-|--------|----------|--------|
-| 报告叙述清楚（30分） | `report.pdf`（数据洞察、实验图表素材） | 贺（整合）、荣（素材） |
-| 代码可运行、部署说明清楚（25分） | `README.md`、`requirements.txt`、`inference.py` | 贺 |
-| val.csv 分类准确率（15分） | `train.py`、`evaluate.py`、最佳模型 | 刘 |
-| 检测依据可解释性（15分） | `explainer.py`、`llm_client.py` | 钱 |
-| 小组分工协作（15分） | 全员 commit 记录 + `分工.md` | 全员（荣 负责 Baseline 与数据流水线） |
-
----
-
 ## 参考与致谢
 
 - HuggingFace Transformers: https://huggingface.co/docs/transformers
