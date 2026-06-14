@@ -36,7 +36,7 @@
 |------|------|----------|
 | 荣 | 数据与 Baseline | `src/data_loader.py`, `eda.ipynb`, `baseline.py` |
 | 刘 | 核心分类模型 | `src/model.py`, `src/train.py`, `src/evaluate.py` |
-| 钱 | 可解释性与 LLM | `src/explainer.py`, `src/llm_client.py` |
+| 钱 | 可解释性与 LLM，模型调试，数据清洗 | `src/explainer.py`, `src/llm_client.py` |
 | 贺 | 系统集成与报告 | `inference.py`, `README.md`, `report.pdf` |
 
 ---
