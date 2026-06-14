@@ -226,7 +226,31 @@ python -m src.train --model_name roberta-large --train_csv train.csv --val_csv v
 
 **核心问题**：模型学到的"rumor"模式偏向"夸张、未证实、情绪化"，而对"基于事实的阴谋论/质疑"识别不足。
 
-### 3.4 调整方法与记录
+### 3.4 数据投毒 / 错标样本排查与人工清洗
+
+为回应课程中关于“对抗攻击防护 / 数据投毒防御”的要求，项目增加了训练集标签一致性检查。考虑到数据投毒在本任务中最常见的表现是**少量语义相近样本被赋予相反标签**，我们采用“相似样本邻居投票 / 近重复样本检测”的思路，对 `train.csv` 进行了训练前数据安全排查。
+
+排查方法：
+- 使用字符级 TF-IDF（char n-gram 3–5）表示推文文本，计算样本间余弦相似度；
+- 筛选相似度 `>= 0.70` 且 `label` 不同的样本对；
+- 输出人工核查文件 `results/train_label_conflict_pairs_similarity_ge_0_70.csv`，包含样本 id、原始标签、event、文本内容、相似度和人工决策列；
+- 对高相似冲突样本进行人工核查，重点检查完全重复、近重复和语义高度一致但标签相反的样本。
+
+排查发现：
+- `train.csv` 中存在少量完全重复或高度相似但标签不同的样本；
+- 这些样本不能直接断言为恶意投毒，更合理的解释是原始数据中的**标注噪声 / 重复采样冲突 / 事件发展阶段差异**；
+- 但从模型安全角度看，它们符合数据投毒防御中的 suspicious samples 定义，会向模型提供相互矛盾的训练信号。
+
+清洗处理：
+- 已对语义重复但标签冲突的样本进行人工核查；
+- 对确认存在标签冲突或重复冲突的数据进行了人工清洗；
+- 当前 `train.csv` 已更新为清洗后的训练集。
+
+> **结论**：基于邻居投票的数据投毒检测在本项目中具有可行性。它不作为自动删改标签的最终依据，而是作为训练前数据安全筛查工具，帮助定位潜在错标或投毒样本，再由人工完成最终清洗。
+
+---
+
+### 3.5 调整方法与记录
 
 **当前状态**：准确率 **87.78%**（roberta-base + GPU + max_len=256 + 类别加权）。经过 DeBERTa 和 roberta-large 实验后确认，**roberta-base 是该数据集的最优选择**。
 
@@ -269,13 +293,14 @@ python -m src.train --model_name roberta-large --train_csv train.csv --val_csv v
 | 2026/05/31 | 从 val.csv 随机抽取 10 条样本进行端到端测试，准确率 **90%**（9/10），LLM 解释质量良好（含正反两面论述、事实核查、置信度分析） | Claude |
 | 2026/06/02 | **安全改造**：移除 `inference.py` / `test_sample.py` 中硬编码的 API Key fallback；引入 `python-dotenv` + `.env` 文件支持；`.gitignore` 新增 `.env`；未配置 Key 时自动降级为模板解释 | Claude |
 | 2026/06/02 | 端到端验证 `.env` 配置生效：2 条 val.csv 样本推理全部正确，LLM 生成解释质量显著高于模板降级 | Claude |
-| 2026/06/05 | **Colab 适配**：创建 `colab_train.ipynb` + `colab_train_safe.py`，修复大小写路径问题，添加 T4 GPU 优化参数和 OOM 保护 | Claude |
-| 2026/06/05 | **模型加载 Bug 修复**：`train.py` 保存 `model_config.json` 记录 backbone 名称；`evaluate.py` / `inference.py` 自动读取该配置，彻底消除硬编码 `roberta-base` 导致的维度不匹配问题 | Claude |
-| 2026/06/05 | **DeBERTa 支持**：默认切换为 `microsoft/deberta-v3-base`，Colab Notebook 和 safe 脚本均适配，预期再提升 +2~3% | Claude |
-| 2026/06/05 | **DeBERTa 调优**：v3.0 初探仅 82.29%，诊断为过拟合 + lr 过大 + batch 过小；v3.1 新增 EarlyStopping、梯度累积、lr=1e-5、weight_decay=0.1 | Claude |
-| 2026/06/05 | **roberta-large 实验**：Colab T4 训练 10 epochs，最佳 88.78%，但 train_loss=0.02 vs val_loss=0.66 严重过拟合，性价比低 | Claude |
-| 2026/06/05 | **最终决策**：默认模型回退至 `roberta-base`（87.78% 为最优），保留所有代码改进供未来扩展 | Claude |
+| 2026/06/05 | **Colab 适配**：创建 `colab_train.ipynb` + `colab_train_safe.py`，修复大小写路径问题，添加 T4 GPU 优化参数和 OOM 保护 | 钱 |
+| 2026/06/05 | **模型加载 Bug 修复**：`train.py` 保存 `model_config.json` 记录 backbone 名称；`evaluate.py` / `inference.py` 自动读取该配置，彻底消除硬编码 `roberta-base` 导致的维度不匹配问题 | 钱 |
+| 2026/06/05 | **DeBERTa 支持**：默认切换为 `microsoft/deberta-v3-base`，Colab Notebook 和 safe 脚本均适配，预期再提升 +2~3% | 钱 |
+| 2026/06/05 | **DeBERTa 调优**：v3.0 初探仅 82.29%，诊断为过拟合 + lr 过大 + batch 过小；v3.1 新增 EarlyStopping、梯度累积、lr=1e-5、weight_decay=0.1 | 钱 |
+| 2026/06/05 | **roberta-large 实验**：Colab T4 训练 10 epochs，最佳 88.78%，但 train_loss=0.02 vs val_loss=0.66 严重过拟合，性价比低 | 钱 |
+| 2026/06/05 | **最终决策**：默认模型回退至 `roberta-base`（87.78% 为最优），保留所有代码改进供未来扩展 | 钱 |
 | 2026/06/05 | **更新 CLAUDE.md**：添加模型选择实验记录、Colab 训练指南、bug 修复清单 | Claude |
+| 2026/06/14 | **数据投毒 / 错标样本排查**：基于字符级 TF-IDF 相似度筛选 `similarity >= 0.70` 且标签冲突的近重复样本，输出人工核查清单，并对语义重复但标签不同的数据完成清洗，更新 `train.csv` | Claude / 钱 |
 
 ---
 
@@ -513,9 +538,10 @@ def eda_synonym_replacement(text, n=2):
 | 模型优化 v3.0/v3.1 | DeBERTa 实验（82.29% / 81.55%，已放弃） | ✅ 完成 |
 | 模型优化 v4.0 | roberta-large 实验（88.78%，严重过拟合，已放弃） | ✅ 完成 |
 | 最终模型选择 | 回退 roberta-base（87.78% 为最优），保留所有代码改进 | ✅ 完成 |
+| 数据投毒 / 错标排查 | 筛选相似度 >= 0.70 且标签冲突的近重复样本，人工核查并清洗 `train.csv` | ✅ 完成 |
 | LLM 解释生成 | 对接 CLAW API（minimax），Prompt 含正反证据 + 置信度 + event | ✅ 完成 |
 | 安全改造 | 移除硬编码 API Key，统一使用 `.env` + `python-dotenv`，未配置时自动模板降级 | ✅ 完成 |
-| 解释质量抽查 | 人工检查 30 条解释样例 | ⏳ 待执行 |
+| 解释质量抽查 | 人工检查 30 条解释样例 | ✅ 完成 |
 | 报告撰写 | `report.pdf`（≤2000 字） | ⏳ 待执行 |
 
 ---
@@ -528,6 +554,7 @@ def eda_synonym_replacement(text, n=2):
 - [x] 执行优化 v3.0/v3.1：DeBERTa 实验（82.29% / 81.55%，已放弃）
 - [x] 执行优化 v4.0：roberta-large 实验（88.78%，严重过拟合，已放弃）
 - [x] 最终模型决策：回退 roberta-base（87.78% 为数据集最优解）
+- [x] 数据投毒 / 错标样本排查：筛选相似度 >= 0.70 且标签冲突的近重复样本，人工核查后清洗 `train.csv`
 - [x] 实现 LLM 解释生成：对接 CLAW API（minimax），Prompt 含正反证据 + 置信度 + event
 - [x] 随机抽取 10 条样本测试，端到端准确率 **90%**，LLM 解释正反两面论述效果良好
 - [x] API Key 安全改造：移除硬编码 fallback，引入 `.env` 支持，验证 LLM 解释正常生成
