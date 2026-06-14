@@ -46,6 +46,7 @@ Final output
 | `inference.py` | 端到端推理入口，支持单条文本和 CSV 批量推理 |
 | `test_sample.py` | 从 `val.csv` 随机抽取 10 条样本进行端到端测试 |
 | `src/adversarial_analysis.py` | 字符级输入扰动鲁棒性测试脚本 |
+| `visualize_explanation.py` | 单条文本 Captum 归因可视化脚本，输出红绿高亮 HTML 和 JSON |
 | `Project.md` | 项目全过程记录，包括实验、调参、安全分析与数据清洗 |
 | `requirements.txt` | Python 依赖 |
 
@@ -178,9 +179,58 @@ merges.txt
 
 ---
 
-## 4. 如何运行模型
+## 4. 运行前配置 .env 文件
 
-### 4.1 单条文本推理
+在运行谣言判断前，建议先配置 `.env` 文件，用于启用 SJTU CLAW API 的自然语言解释生成。分类模型本身不依赖 API Key；但如果没有配置 `.env`，系统只能使用模板 fallback 解释。
+
+课程要求如使用大语言模型，需使用 SJTU 提供的 CLAW API。本项目所有 LLM 调用都集中封装在：
+
+```text
+src/llm_client.py
+```
+
+API Key 不允许硬编码，必须通过环境变量或 `.env` 文件提供。
+
+### 4.1 推荐方式：使用 .env 文件
+
+在项目根目录新建 `.env` 文件：
+
+```env
+CLAW_API_KEY=your_api_key_here
+CLAW_BASE_URL=https://models.sjtu.edu.cn/api
+```
+
+`.env` 已加入 `.gitignore`，不会提交到 GitHub。
+
+配置完成后再运行：
+
+```bash
+python inference.py --text "Here is a sample tweet text." --event 0
+```
+
+### 4.2 备选方式：使用临时环境变量
+
+Linux / macOS：
+
+```bash
+export CLAW_API_KEY="your_api_key_here"
+export CLAW_BASE_URL="https://models.sjtu.edu.cn/api"
+```
+
+Windows PowerShell：
+
+```powershell
+$env:CLAW_API_KEY="your_api_key_here"
+$env:CLAW_BASE_URL="https://models.sjtu.edu.cn/api"
+```
+
+如果未配置 API Key，系统仍可正常运行，只是解释会使用模板 fallback。
+
+---
+
+## 5. 如何运行模型
+
+### 5.1 单条文本推理
 
 ```bash
 python inference.py --text "Here is a sample tweet text." --event 0
@@ -222,7 +272,7 @@ python inference.py --model_dir charchar2333/Rumor-detection --text "Here is a s
 | `evidence.opposite` | 支持相反类别的关键 token |
 | `event` | 输入事件编号 |
 
-### 4.2 批量 CSV 推理
+### 5.2 批量 CSV 推理
 
 输入 CSV 至少应包含：
 
@@ -250,7 +300,7 @@ python inference.py --model_dir charchar2333/Rumor-detection --input val.csv --o
 id,text,label,confidence,explanation,event
 ```
 
-### 4.3 不使用 LLM，仅使用模板解释
+### 5.3 不使用 LLM，仅使用模板解释
 
 如果没有配置 CLAW API Key，程序会自动降级为模板解释。也可以显式跳过 LLM：
 
@@ -266,48 +316,50 @@ python inference.py --input val.csv --output results/predictions.csv --no_llm
 
 ---
 
-## 5. CLAW API 配置，可选但推荐
+## 6. 单条文本归因可视化
 
-课程要求如使用大语言模型，需使用 SJTU 提供的 CLAW API。本项目所有 LLM 调用都集中封装在：
-
-```text
-src/llm_client.py
-```
-
-API Key 不允许硬编码，必须通过环境变量或 `.env` 文件提供。
-
-### 5.1 使用 .env 文件
-
-在项目根目录新建 `.env`：
-
-```env
-CLAW_API_KEY=your_api_key_here
-CLAW_BASE_URL=https://models.sjtu.edu.cn/api
-```
-
-`.env` 已加入 `.gitignore`，不会提交到 GitHub。
-
-### 5.2 使用临时环境变量
-
-Linux / macOS：
+可以使用 Captum 的 `visualization` 工具为单条文本生成 token 级高亮解释图。正向贡献显示为绿色，负向贡献显示为红色。
 
 ```bash
-export CLAW_API_KEY="your_api_key_here"
-export CLAW_BASE_URL="https://models.sjtu.edu.cn/api"
+python visualize_explanation.py \
+  --model_dir checkpoints \
+  --text "Breaking: unconfirmed reports say the bridge collapsed." \
+  --prefix bridge_example
 ```
 
-Windows PowerShell：
+使用 HuggingFace 模型：
 
-```powershell
-$env:CLAW_API_KEY="your_api_key_here"
-$env:CLAW_BASE_URL="https://models.sjtu.edu.cn/api"
+```bash
+python visualize_explanation.py \
+  --model_dir charchar2333/Rumor-detection \
+  --text "Breaking: unconfirmed reports say the bridge collapsed." \
+  --prefix bridge_example
 ```
 
-如果未配置 API Key，系统仍可正常运行，只是解释会使用模板 fallback。
+输出文件：
+
+```text
+results/explanation_examples/bridge_example_attribution.html
+results/explanation_examples/bridge_example_attribution.json
+```
+
+打开 HTML 文件即可查看高亮颜色条，JSON 文件保存 token、归因分数、预测标签和置信度。
+
+可选参数：
+
+| 参数 | 说明 |
+|---|---|
+| `--target_label 0` | 解释模型对 non-rumor 类的归因 |
+| `--target_label 1` | 解释模型对 rumor 类的归因 |
+| 不传 `--target_label` | 默认解释模型当前预测类别 |
+| `--output_dir` | 指定 HTML / JSON 输出目录 |
+| `--prefix` | 指定输出文件名前缀 |
+
+该功能主要用于报告展示和解释质量人工核查：如果高亮 token 与文本中的谣言线索一致，说明模型解释较可信；如果高亮集中在无意义符号或无关词，则说明模型可能依赖了错误特征。
 
 ---
 
-## 6. 训练模型
+## 7. 训练模型
 
 如果需要重新训练模型，运行：
 
@@ -352,7 +404,7 @@ checkpoints/
 
 ---
 
-## 7. 模型评估
+## 8. 模型评估
 
 ```bash
 python -m src.evaluate --model_dir checkpoints --val_csv val.csv --max_len 256
@@ -384,7 +436,7 @@ results/confusion_matrix.png
 
 ---
 
-## 8. 快速随机测试
+## 9. 快速随机测试
 
 从 `val.csv` 随机抽取 10 条样本，进行完整端到端测试：
 
@@ -410,7 +462,7 @@ python test_sample.py --model_dir charchar2333/Rumor-detection
 
 ---
 
-## 9. 对抗扰动鲁棒性测试
+## 10. 对抗扰动鲁棒性测试
 
 项目包含字符级输入扰动测试，用于评估模型面对简单规避攻击时的鲁棒性。
 
@@ -468,7 +520,7 @@ results/adversarial_extended_examples.csv
 
 ---
 
-## 10. 数据投毒 / 错标样本清洗
+## 11. 数据投毒 / 错标样本清洗
 
 项目还进行了训练集标签一致性检查，用于发现潜在数据投毒或错标样本。
 
@@ -490,7 +542,7 @@ results/train_label_conflict_pairs_similarity_ge_0_70.csv
 
 ---
 
-## 11. 数据格式
+## 12. 数据格式
 
 `train.csv` 和 `val.csv` 均包含四列：
 
@@ -505,7 +557,7 @@ results/train_label_conflict_pairs_similarity_ge_0_70.csv
 
 ---
 
-## 12. 常见问题
+## 13. 常见问题
 
 ### Q1: 没有 `CLAW_API_KEY` 能运行吗？
 
@@ -547,7 +599,7 @@ python test_sample.py --model_dir charchar2333/Rumor-detection
 
 ---
 
-## 13. 参考
+## 14. 参考
 
 - HuggingFace Transformers: https://huggingface.co/docs/transformers
 - PyTorch: https://pytorch.org/
